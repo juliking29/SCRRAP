@@ -4,8 +4,18 @@ from bs4 import BeautifulSoup
 from datetime import datetime
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware  # 👈 IMPORTANTE
 
 app = FastAPI()
+
+# 👇 AÑADIR MIDDLEWARE DE CORS
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # Puedes poner tu dominio frontend si quieres más seguridad
+    allow_credentials=True,
+    allow_methods=["*"],  # Asegura permitir OPTIONS
+    allow_headers=["*"],
+)
 
 def scrape_matches():
     url = 'https://www.besoccer.com'
@@ -109,12 +119,10 @@ def scrape_matches():
     else:
         return {"error": f"Error al obtener la página. Código de estado: {response.status_code}"}
 
-# Ruta raíz
 @app.get("/")
 def root():
     return {"message": "Bienvenido al scraper"}
 
-# Ruta para obtener los datos
 @app.get("/scrape")
 def get_matches():
     try:

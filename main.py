@@ -229,8 +229,13 @@ def get_matches():
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/scrape_match")
-async def get_match_details(url: str):
+async def get_match_details(request: dict):
     try:
+        if "url" not in request:
+            raise HTTPException(status_code=422, detail="Se requiere el campo 'url'")
+            
+        url = request["url"]
+        
         if not url.startswith('https://www.besoccer.com/match/'):
             raise HTTPException(status_code=400, detail="URL no válida")
         

@@ -5,6 +5,7 @@ from datetime import datetime
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi import Request
 
 app = FastAPI()
 
@@ -229,23 +230,33 @@ def get_matches():
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/scrape_match")
-async def get_match_details(request: dict):
+async def get_match_details(request: Request):
     try:
-        if "url" not in request:
-            raise HTTPException(status_code=422, detail="Se requiere el campo 'url'")
+        # Obtener el cuerpo de la solicitud como JSON
+        body = await request.json()
+        
+        # Validar que existe el campo url
+        if "url" not in body:
+            raise HTTPException(status_code=422, detail="El campo 'url' es requerido")
             
-        url = request["url"]
+        url = body["url"]
         
-        if not url.startswith('https://www.besoccer.com/match/'):
-            raise HTTPException(status_code=400, detail="URL no válida")
+        # Validar formato de URL
+        if not isinstance(url, str) or not url.startswith('https://www.besoccer.com/match/'):
+            raise HTTPException(status_code=400, detail="URL no válida. Debe comenzar con 'https://www.besoccer.com/match/'")
         
+        # Llamar a la función de scraping
         data = scrape_match_details(url)
         
         if "error" in data:
             raise HTTPException(status_code=404, detail=data["error"])
             
-        return JSONResponse(content=data)
+        return data
+        
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Cuerpo de solicitud no válido. Se espera JSON")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        print(f"Error interno: {str(e)}")  # Log para diagnóstico
+        raise HTTPException(status_code=500, detail=f"Error interno del servidor: {str(e)}")
 
 # Para ejecutar localmente: uvicorn main:app --reload

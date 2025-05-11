@@ -5,7 +5,6 @@ from datetime import datetime
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi import Request
 
 app = FastAPI()
 
@@ -124,51 +123,98 @@ def scrape_matches():
         return {"error": f"Error al obtener la página. Código: {response.status_code}"}
 
 def scrape_match_details(match_url: str):
-    try:
-        # Configura headers más completos y realistas
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
-            'Accept-Language': 'es-ES,es;q=0.9',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'Connection': 'keep-alive',
-            'Referer': 'https://www.besoccer.com/',
-            'Sec-Fetch-Dest': 'document',
-            'Sec-Fetch-Mode': 'navigate',
-            'Sec-Fetch-Site': 'same-origin',
-            'Sec-Fetch-User': '?1',
-            'Upgrade-Insecure-Requests': '1',
-            'DNT': '1',
-        }
-
-        # Añade cookies si es necesario (simula un navegador real)
-        cookies = {
-            'cookie_consent': 'true',
-            'region': 'es',
-        }
-
-        response = requests.get(
-            match_url,
-            headers=headers,
-            cookies=cookies,
-            timeout=15
-        )
-
-        if response.status_code == 406:
-            raise ValueError("Besoccer rechazó la conexión (406). Probable detección de scraping.")
-
-        response.raise_for_status()  # Lanza excepción para códigos 4xx/5xx
-
-        # Verifica que el contenido sea HTML
-        if 'text/html' not in response.headers.get('Content-Type', ''):
-            raise ValueError("La respuesta no es HTML")
-
+    response = requests.get(match_url)
+    
+    if response.status_code == 200:
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # Resto de tu lógica de scraping...
+        match_info = {
+            "homeTeam": {},
+            "awayTeam": {},
+            "matchDetails": {},
+            "probabilities": {}
+        }
         
-    except Exception as e:
-        return {"error": f"Error al scrapear: {str(e)}"}
+        # Obtener el contenedor principal del partido
+        match_div = soup.find('div', class_='info match-link')
+        
+        if not match_div:
+            return {"error": "No se encontró la información del partido"}
+        
+        # Información de los equipos
+        home_team = match_div.find('div', class_='team match-team left')
+        away_team = match_div.find('div', class_='team match-team right')
+        
+        if home_team and away_team:
+            # Equipo local
+            match_info["homeTeam"]["name"] = home_team.find('p', class_='name').text.strip()
+            match_info["homeTeam"]["logo"] = home_team.find('img')['src'] if home_team.find('img') else ""
+            match_info["homeTeam"]["yellowCards"] = home_team.find('span', class_='yc').text.strip() if home_team.find('span', class_='yc') else "0"
+            match_info["homeTeam"]["possession"] = home_team.find('span', class_='posesion-perc').text.strip() if home_team.find('span', class_='posesion-perc') else "0%"
+            
+            # Equipo visitante
+            match_info["awayTeam"]["name"] = away_team.find('p', class_='name').text.strip()
+            match_info["awayTeam"]["logo"] = away_team.find('img')['src'] if away_team.find('img') else ""
+            match_info["awayTeam"]["yellowCards"] = away_team.find('span', class_='yc').text.strip() if away_team.find('span', class_='yc') else "0"
+            match_info["awayTeam"]["possession"] = away_team.find('span', class_='posesion-perc').text.strip() if away_team.find('span', class_='posesion-perc') else "0%"
+        
+        # Marcador
+        marker = match_div.find('div', class_='marker')
+        if marker:
+            score_div = marker.find('div', class_='data')
+            if score_div:
+                match_info["matchDetails"]["score"] = score_div.get_text(strip=True)
+        
+        # Estado del partido
+        status_tag = match_div.find('div', class_='tag')
+        if status_tag:
+            match_info["matchDetails"]["status"] = status_tag.text.strip()
+        
+        # Fecha y hora del partido
+        date_div = match_div.find('div', class_='date header-match-date')
+        if date_div:
+            match_info["matchDetails"]["dateTime"] = date_div.text.strip()
+        
+        # Probabilidades
+        elo_bar = soup.find('div', class_='elo-bar-content')
+        if elo_bar:
+            team1_label = elo_bar.find('div', class_='team1-c')
+            draw_label = elo_bar.find('div', class_='color-grey2')
+            team2_label = elo_bar.find('div', class_='team2-c')
+            
+            if team1_label:
+                match_info["probabilities"]["home"] = team1_label.find('div').text.strip()
+            if draw_label:
+                match_info["probabilities"]["draw"] = draw_label.find('div').text.strip()
+            if team2_label:
+                match_info["probabilities"]["away"] = team2_label.find('div').text.strip()
+            
+            # Valores numéricos
+            team1_bar = elo_bar.find('div', class_='team1-bar')
+            draw_bar = elo_bar.find('div', class_='draw-bar')
+            team2_bar = elo_bar.find('div', class_='team2-bar')
+            
+            if team1_bar and 'style' in team1_bar.attrs:
+                try:
+                    match_info["probabilities"]["homeValue"] = float(team1_bar['style'].split(':')[1].replace('%', '').strip())
+                except:
+                    match_info["probabilities"]["homeValue"] = 0
+            
+            if draw_bar and 'style' in draw_bar.attrs:
+                try:
+                    match_info["probabilities"]["drawValue"] = float(draw_bar['style'].split(':')[1].replace('%', '').strip())
+                except:
+                    match_info["probabilities"]["drawValue"] = 0
+            
+            if team2_bar and 'style' in team2_bar.attrs:
+                try:
+                    match_info["probabilities"]["awayValue"] = float(team2_bar['style'].split(':')[1].replace('%', '').strip())
+                except:
+                    match_info["probabilities"]["awayValue"] = 0
+        
+        return match_info
+    else:
+        return {"error": f"Error al obtener la página del partido. Código: {response.status_code}"}
 
 @app.get("/")
 def root():
@@ -182,50 +228,19 @@ def get_matches():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-from pydantic import BaseModel
-
-class MatchRequest(BaseModel):
-    url: str
-
-from fastapi import HTTPException, Request
-import requests
-from bs4 import BeautifulSoup
-import logging
-
-# Configura logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-from urllib.parse import urlparse
-
 @app.post("/scrape_match")
-async def get_match_details(request: Request):
+async def get_match_details(url: str):
     try:
-        body = await request.json()
-        url = body.get("url")
+        if not url.startswith('https://www.besoccer.com/match/'):
+            raise HTTPException(status_code=400, detail="URL no válida")
         
-        if not url:
-            raise HTTPException(status_code=422, detail="URL requerida")
+        data = scrape_match_details(url)
+        
+        if "error" in data:
+            raise HTTPException(status_code=404, detail=data["error"])
             
-        # Validar formato de URL
-        parsed = urlparse(url)
-        if not all([parsed.scheme, parsed.netloc]):
-            raise HTTPException(status_code=400, detail="URL mal formada")
-            
-        if parsed.netloc != "www.besoccer.com" or not parsed.path.startswith("/match/"):
-            raise HTTPException(status_code=400, detail="URL debe ser de Besoccer y contener /match/")
-        
-        # Eliminar posibles duplicados del dominio
-        clean_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
-        
-        result = scrape_match_details(clean_url)
-        
-        if "error" in result:
-            raise HTTPException(status_code=400, detail=result["error"])
-            
-        return result
-        
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=400, detail="Cuerpo debe ser JSON válido")
+        return JSONResponse(content=data)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+# Para ejecutar localmente: uvicorn main:app --reload

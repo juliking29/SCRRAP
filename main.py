@@ -125,28 +125,49 @@ def scrape_matches():
 
 def scrape_match_details(match_url: str):
     try:
-        print(f"Iniciando scraping de: {match_url}")  # ← Log importante
-        
+        # Configura headers más completos y realistas
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+            'Accept-Language': 'es-ES,es;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive',
+            'Referer': 'https://www.besoccer.com/',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'same-origin',
+            'Sec-Fetch-User': '?1',
+            'Upgrade-Insecure-Requests': '1',
+            'DNT': '1',
         }
-        
-        response = requests.get(match_url, headers=headers, timeout=10)
-        print(f"Status code recibido: {response.status_code}")  # ← Log importante
-        
-        if response.status_code != 200:
-            return {"error": f"Besoccer respondió con código {response.status_code}"}
+
+        # Añade cookies si es necesario (simula un navegador real)
+        cookies = {
+            'cookie_consent': 'true',
+            'region': 'es',
+        }
+
+        response = requests.get(
+            match_url,
+            headers=headers,
+            cookies=cookies,
+            timeout=15
+        )
+
+        if response.status_code == 406:
+            raise ValueError("Besoccer rechazó la conexión (406). Probable detección de scraping.")
+
+        response.raise_for_status()  # Lanza excepción para códigos 4xx/5xx
+
+        # Verifica que el contenido sea HTML
+        if 'text/html' not in response.headers.get('Content-Type', ''):
+            raise ValueError("La respuesta no es HTML")
 
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # Verifica que la página contiene los elementos esperados
-        if not soup.find('div', class_='info match-link'):
-            return {"error": "Estructura de página no reconocida"}
-
-        # ... resto de tu lógica de scraping ...
+        # Resto de tu lógica de scraping...
         
     except Exception as e:
-        print(f"Error durante scraping: {str(e)}")  # ← Log importante
         return {"error": f"Error al scrapear: {str(e)}"}
 
 @app.get("/")
@@ -178,69 +199,18 @@ logger = logging.getLogger(__name__)
 @app.post("/scrape_match")
 async def get_match_details(request: Request):
     try:
-        # 1. Obtener y validar el cuerpo JSON
         body = await request.json()
-        logger.info(f"Cuerpo recibido: {body}")
+        url = body.get("url")
         
-        if "url" not in body:
-            raise HTTPException(status_code=422, detail="El campo 'url' es requerido")
+        if not url:
+            raise HTTPException(status_code=422, detail="URL requerida")
             
-        url = body["url"]
-        logger.info(f"URL a scrapear: {url}")
-
-        # 2. Validar formato de URL
-        if not isinstance(url, str) or not url.startswith('https://www.besoccer.com/match/'):
-            raise HTTPException(status_code=400, detail="URL debe comenzar con https://www.besoccer.com/match/")
-
-        # 3. Configurar headers para el scraping
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            'Accept-Language': 'es-ES,es;q=0.8,en-US;q=0.5,en;q=0.3',
-        }
-
-        # 4. Realizar la petición a Besoccer con timeout
-        try:
-            logger.info(f"Realizando petición a: {url}")
-            response = requests.get(url, headers=headers, timeout=10)
-            response.raise_for_status()  # Lanza excepción para códigos 4xx/5xx
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Error al hacer request a Besoccer: {str(e)}")
-            raise HTTPException(status_code=502, detail=f"Error al conectar con Besoccer: {str(e)}")
-
-        # 5. Parsear el HTML
-        try:
-            soup = BeautifulSoup(response.text, 'html.parser')
+        result = scrape_match_details(url)
+        
+        if "error" in result:
+            raise HTTPException(status_code=400, detail=result["error"])
             
-            # Verificar que la página contiene los elementos esperados
-            if not soup.find('div', class_='info match-link'):
-                raise ValueError("Estructura de página no reconocida")
-
-            # Extraer datos (ejemplo básico)
-            match_info = {
-                "homeTeam": {
-                    "name": "Por implementar",
-                    "logo": ""
-                },
-                "awayTeam": {
-                    "name": "Por implementar",
-                    "logo": ""
-                },
-                "status": "success"
-            }
-            
-            logger.info("Scraping completado con éxito")
-            return match_info
-
-        except Exception as e:
-            logger.error(f"Error al parsear HTML: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Error al procesar la página: {str(e)}")
-
-    except json.JSONDecodeError:
-        logger.error("Cuerpo de solicitud no es JSON válido")
-        raise HTTPException(status_code=400, detail="Cuerpo debe ser JSON válido")
-    except HTTPException:
-        raise  # Re-lanza las excepciones HTTP que ya hemos creado
+        return result
+        
     except Exception as e:
-        logger.error(f"Error inesperado: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error interno del servidor: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))

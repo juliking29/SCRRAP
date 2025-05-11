@@ -196,6 +196,8 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+from urllib.parse import urlparse
+
 @app.post("/scrape_match")
 async def get_match_details(request: Request):
     try:
@@ -205,12 +207,25 @@ async def get_match_details(request: Request):
         if not url:
             raise HTTPException(status_code=422, detail="URL requerida")
             
-        result = scrape_match_details(url)
+        # Validar formato de URL
+        parsed = urlparse(url)
+        if not all([parsed.scheme, parsed.netloc]):
+            raise HTTPException(status_code=400, detail="URL mal formada")
+            
+        if parsed.netloc != "www.besoccer.com" or not parsed.path.startswith("/match/"):
+            raise HTTPException(status_code=400, detail="URL debe ser de Besoccer y contener /match/")
+        
+        # Eliminar posibles duplicados del dominio
+        clean_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+        
+        result = scrape_match_details(clean_url)
         
         if "error" in result:
             raise HTTPException(status_code=400, detail=result["error"])
             
         return result
         
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail="Cuerpo debe ser JSON válido")
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

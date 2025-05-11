@@ -2,6 +2,10 @@ import json
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime
+from fastapi import FastAPI
+from fastapi.responses import JSONResponse
+
+app = FastAPI()
 
 def scrape_matches():
     url = 'https://www.besoccer.com'
@@ -53,34 +57,28 @@ def scrape_matches():
                 else:
                     continue
 
-                # Obtener marcador y estado del partido
                 marcador_div = partido.find('div', class_='marker')
                 tiempo = ""
-                estado = "scheduled"  # por defecto asumimos que no ha comenzado
+                estado = "scheduled"
                 marcador = ""
                 
                 if marcador_div:
-                    # Verificar si es un partido en vivo
                     tiempo_tag = partido.find('span', class_='tag-nobg live')
                     if tiempo_tag:
                         estado = "live"
-                        tiempo = tiempo_tag.find('b').text.strip()  # Obtener el minuto
+                        tiempo = tiempo_tag.find('b').text.strip()
                         marcador = marcador_div.get_text(strip=True)
                     else:
-                        # Es un partido programado
                         hora = marcador_div.find('p', class_='match_hour time')
                         if hora:
                             tiempo = hora.text.strip()
                             estado = "scheduled"
                         else:
-                            # Podría ser un partido finalizado
                             marcador = marcador_div.get_text(strip=True)
                             estado = "finished"
                 
-                # Usar la fecha actual para el partido
                 today = datetime.now().strftime('%Y-%m-%d')
                 
-                # Crear objeto de partido
                 match_data = {
                     "homeTeam": {
                         "name": nombre_local,
@@ -99,7 +97,7 @@ def scrape_matches():
                     match_data["score"] = marcador
                 elif estado == "scheduled":
                     match_data["time"] = tiempo
-                else:  # finished
+                else:
                     match_data["score"] = marcador
                 
                 league_data["matches"].append(match_data)
@@ -111,6 +109,13 @@ def scrape_matches():
     else:
         return {"error": f"Error al obtener la página. Código de estado: {response.status_code}"}
 
-if __name__ == "__main__":
-    matches_data = scrape_matches()
-    print(json.dumps(matches_data, ensure_ascii=False, indent=2))
+# Ruta raíz
+@app.get("/")
+def root():
+    return {"message": "Bienvenido al scraper"}
+
+# Ruta para obtener los datos
+@app.get("/scrape")
+def get_matches():
+    data = scrape_matches()
+    return JSONResponse(content=data, ensure_ascii=False)

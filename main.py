@@ -117,5 +117,9 @@ def root():
 # Ruta para obtener los datos
 @app.get("/scrape")
 def get_matches():
-    data = scrape_matches()
-    return JSONResponse(content=data, ensure_ascii=False)
+    try:
+        data = scrape_matches()
+        return JSONResponse(content=data, ensure_ascii=False)
+    except Exception as e:
+        print("ERROR EN SCRAPER:", e)
+        return JSONResponse(content={"error": str(e)}, status_code=500)

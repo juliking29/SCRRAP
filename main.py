@@ -167,42 +167,80 @@ class MatchRequest(BaseModel):
     url: str
 
 from fastapi import HTTPException, Request
-import json
+import requests
+from bs4 import BeautifulSoup
+import logging
+
+# Configura logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 @app.post("/scrape_match")
 async def get_match_details(request: Request):
     try:
-        # 1. Obtener el cuerpo de la solicitud
+        # 1. Obtener y validar el cuerpo JSON
         body = await request.json()
-        print("Cuerpo recibido:", body)  # ← Log importante
-
-        # 2. Validar que existe el campo 'url'
+        logger.info(f"Cuerpo recibido: {body}")
+        
         if "url" not in body:
-            raise HTTPException(status_code=422, detail="Falta el campo 'url' en el cuerpo")
-        
+            raise HTTPException(status_code=422, detail="El campo 'url' es requerido")
+            
         url = body["url"]
-        print("URL recibida para scraping:", url)  # ← Log importante
+        logger.info(f"URL a scrapear: {url}")
 
-        # 3. Validar formato de URL
-        if not isinstance(url, str):
-            raise HTTPException(status_code=400, detail="URL debe ser texto")
-            
-        if not url.startswith('https://www.besoccer.com/match/'):
-            raise HTTPException(status_code=400, detail="URL debe ser de Besoccer")
+        # 2. Validar formato de URL
+        if not isinstance(url, str) or not url.startswith('https://www.besoccer.com/match/'):
+            raise HTTPException(status_code=400, detail="URL debe comenzar con https://www.besoccer.com/match/")
 
-        # 4. Ejecutar scraping
-        result = scrape_match_details(url)
-        
-        if "error" in result:
-            print("Error en scraping:", result["error"])  # ← Log importante
-            raise HTTPException(status_code=400, detail=result["error"])
+        # 3. Configurar headers para el scraping
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'es-ES,es;q=0.8,en-US;q=0.5,en;q=0.3',
+        }
+
+        # 4. Realizar la petición a Besoccer con timeout
+        try:
+            logger.info(f"Realizando petición a: {url}")
+            response = requests.get(url, headers=headers, timeout=10)
+            response.raise_for_status()  # Lanza excepción para códigos 4xx/5xx
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Error al hacer request a Besoccer: {str(e)}")
+            raise HTTPException(status_code=502, detail=f"Error al conectar con Besoccer: {str(e)}")
+
+        # 5. Parsear el HTML
+        try:
+            soup = BeautifulSoup(response.text, 'html.parser')
             
-        return result
-        
+            # Verificar que la página contiene los elementos esperados
+            if not soup.find('div', class_='info match-link'):
+                raise ValueError("Estructura de página no reconocida")
+
+            # Extraer datos (ejemplo básico)
+            match_info = {
+                "homeTeam": {
+                    "name": "Por implementar",
+                    "logo": ""
+                },
+                "awayTeam": {
+                    "name": "Por implementar",
+                    "logo": ""
+                },
+                "status": "success"
+            }
+            
+            logger.info("Scraping completado con éxito")
+            return match_info
+
+        except Exception as e:
+            logger.error(f"Error al parsear HTML: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Error al procesar la página: {str(e)}")
+
     except json.JSONDecodeError:
-        print("Error: Cuerpo no es JSON válido")
-        raise HTTPException(status_code=400, detail="Cuerpo debe ser JSON")
+        logger.error("Cuerpo de solicitud no es JSON válido")
+        raise HTTPException(status_code=400, detail="Cuerpo debe ser JSON válido")
+    except HTTPException:
+        raise  # Re-lanza las excepciones HTTP que ya hemos creado
     except Exception as e:
-        print("Error interno:", str(e))  # ← Log importante
-        raise HTTPException(status_code=500, detail=f"Error interno: {str(e)}")
-# Para ejecutar localmente: uvicorn main:app --reload
+        logger.error(f"Error inesperado: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error interno del servidor: {str(e)}")

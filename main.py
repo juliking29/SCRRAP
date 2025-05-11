@@ -249,12 +249,10 @@ def get_matches():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/scrape_match")
-async def get_match_details(url: str = Body(..., embed=True)):
+@app.get("/scrape_match/{match_id}")
+async def get_match_details_by_id(match_id: str):
     try:
-        if not url.startswith('https://www.besoccer.com/match/'):
-            raise HTTPException(status_code=400, detail="URL no válida")
-        
+        url = f"https://www.besoccer.com/match/{match_id}"
         data = scrape_match_details(url)
         
         if "error" in data:

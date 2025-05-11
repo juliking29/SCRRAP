@@ -119,7 +119,7 @@ def root():
 def get_matches():
     try:
         data = scrape_matches()
-        return JSONResponse(content=data, ensure_ascii=False)
+        return JSONResponse(content=data)
     except Exception as e:
         print("ERROR EN SCRAPER:", e)
         return JSONResponse(content={"error": str(e)}, status_code=500)

@@ -2,7 +2,7 @@ import json
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Body
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -35,7 +35,7 @@ def scrape_matches():
             if not titulo_div:
                 continue
                 
-            nombre_liga = titulo_div.find('span').text.strip() if titulo_div else "Liga desconocida"
+            nombre_liga = titulo_div.find('span').text.strip() if titulo_div and titulo_div.find('span') else "Liga desconocida"
             logo_liga = titulo_div.find('img')['src'] if titulo_div and titulo_div.find('img') else ""
 
             contenedor_partidos = panel.find_next_sibling('div')
@@ -147,13 +147,23 @@ def scrape_match_details(match_url: str):
         
         if home_team and away_team:
             # Equipo local
-            match_info["homeTeam"]["name"] = home_team.find('p', class_='name').text.strip()
+            home_name_elem = home_team.find('p', class_='name')
+            if home_name_elem and home_name_elem.find('a'):
+                match_info["homeTeam"]["name"] = home_name_elem.find('a').text.strip()
+            else:
+                match_info["homeTeam"]["name"] = home_name_elem.text.strip() if home_name_elem else "Equipo Local"
+                
             match_info["homeTeam"]["logo"] = home_team.find('img')['src'] if home_team.find('img') else ""
             match_info["homeTeam"]["yellowCards"] = home_team.find('span', class_='yc').text.strip() if home_team.find('span', class_='yc') else "0"
             match_info["homeTeam"]["possession"] = home_team.find('span', class_='posesion-perc').text.strip() if home_team.find('span', class_='posesion-perc') else "0%"
             
             # Equipo visitante
-            match_info["awayTeam"]["name"] = away_team.find('p', class_='name').text.strip()
+            away_name_elem = away_team.find('p', class_='name')
+            if away_name_elem and away_name_elem.find('a'):
+                match_info["awayTeam"]["name"] = away_name_elem.find('a').text.strip()
+            else:
+                match_info["awayTeam"]["name"] = away_name_elem.text.strip() if away_name_elem else "Equipo Visitante"
+                
             match_info["awayTeam"]["logo"] = away_team.find('img')['src'] if away_team.find('img') else ""
             match_info["awayTeam"]["yellowCards"] = away_team.find('span', class_='yc').text.strip() if away_team.find('span', class_='yc') else "0"
             match_info["awayTeam"]["possession"] = away_team.find('span', class_='posesion-perc').text.strip() if away_team.find('span', class_='posesion-perc') else "0%"
@@ -183,11 +193,11 @@ def scrape_match_details(match_url: str):
             team2_label = elo_bar.find('div', class_='team2-c')
             
             if team1_label:
-                match_info["probabilities"]["home"] = team1_label.find('div').text.strip()
+                match_info["probabilities"]["home"] = team1_label.find('div').text.strip() if team1_label.find('div') else "0%"
             if draw_label:
-                match_info["probabilities"]["draw"] = draw_label.find('div').text.strip()
+                match_info["probabilities"]["draw"] = draw_label.find('div').text.strip() if draw_label.find('div') else "0%"
             if team2_label:
-                match_info["probabilities"]["away"] = team2_label.find('div').text.strip()
+                match_info["probabilities"]["away"] = team2_label.find('div').text.strip() if team2_label.find('div') else "0%"
             
             # Valores numéricos
             team1_bar = elo_bar.find('div', class_='team1-bar')
@@ -198,19 +208,30 @@ def scrape_match_details(match_url: str):
                 try:
                     match_info["probabilities"]["homeValue"] = float(team1_bar['style'].split(':')[1].replace('%', '').strip())
                 except:
-                    match_info["probabilities"]["homeValue"] = 0
+                    match_info["probabilities"]["homeValue"] = 33
+            else:
+                match_info["probabilities"]["homeValue"] = 33
             
             if draw_bar and 'style' in draw_bar.attrs:
                 try:
                     match_info["probabilities"]["drawValue"] = float(draw_bar['style'].split(':')[1].replace('%', '').strip())
                 except:
-                    match_info["probabilities"]["drawValue"] = 0
+                    match_info["probabilities"]["drawValue"] = 34
+            else:
+                match_info["probabilities"]["drawValue"] = 34
             
             if team2_bar and 'style' in team2_bar.attrs:
                 try:
                     match_info["probabilities"]["awayValue"] = float(team2_bar['style'].split(':')[1].replace('%', '').strip())
                 except:
-                    match_info["probabilities"]["awayValue"] = 0
+                    match_info["probabilities"]["awayValue"] = 33
+            else:
+                match_info["probabilities"]["awayValue"] = 33
+        else:
+            # Valores por defecto si no se encuentran probabilidades
+            match_info["probabilities"]["homeValue"] = 33
+            match_info["probabilities"]["drawValue"] = 34
+            match_info["probabilities"]["awayValue"] = 33
         
         return match_info
     else:
@@ -229,7 +250,7 @@ def get_matches():
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/scrape_match")
-async def get_match_details(url: str):
+async def get_match_details(url: str = Body(..., embed=True)):
     try:
         if not url.startswith('https://www.besoccer.com/match/'):
             raise HTTPException(status_code=400, detail="URL no válida")

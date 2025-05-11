@@ -125,48 +125,29 @@ def scrape_matches():
 
 def scrape_match_details(match_url: str):
     try:
+        print(f"Iniciando scraping de: {match_url}")  # ← Log importante
+        
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-            'Accept-Language': 'es-ES,es;q=0.9',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
         }
         
-        # Aumenta el timeout a 10 segundos
         response = requests.get(match_url, headers=headers, timeout=10)
+        print(f"Status code recibido: {response.status_code}")  # ← Log importante
         
         if response.status_code != 200:
-            return {"error": f"Error al obtener la página. Código: {response.status_code}"}
+            return {"error": f"Besoccer respondió con código {response.status_code}"}
 
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # Verifica si la página contiene datos válidos
+        # Verifica que la página contiene los elementos esperados
         if not soup.find('div', class_='info match-link'):
-            return {"error": "La estructura de la página ha cambiado o no contiene datos"}
+            return {"error": "Estructura de página no reconocida"}
 
-        # Resto de tu lógica de scraping...
-        match_info = {
-            "homeTeam": {},
-            "awayTeam": {},
-            "matchDetails": {},
-            "probabilities": {}
-        }
-
-        # Extracción de datos (ejemplo simplificado)
-        home_team = soup.find('div', class_='team match-team left')
-        if home_team:
-            match_info["homeTeam"]["name"] = home_team.find('p', class_='name').text.strip() if home_team.find('p', class_='name') else "Desconocido"
-            match_info["homeTeam"]["logo"] = home_team.find('img')['src'] if home_team.find('img') else ""
+        # ... resto de tu lógica de scraping ...
         
-        # Añade más extracciones según sea necesario...
-
-        return match_info
-
-    except requests.exceptions.Timeout:
-        return {"error": "Timeout al conectar con Besoccer"}
-    except requests.exceptions.RequestException as e:
-        return {"error": f"Error de conexión: {str(e)}"}
     except Exception as e:
-        print(f"Error durante scraping: {str(e)}")  # Log para diagnóstico
-        return {"error": f"Error inesperado: {str(e)}"}
+        print(f"Error durante scraping: {str(e)}")  # ← Log importante
+        return {"error": f"Error al scrapear: {str(e)}"}
 
 @app.get("/")
 def root():
@@ -185,19 +166,43 @@ from pydantic import BaseModel
 class MatchRequest(BaseModel):
     url: str
 
+from fastapi import HTTPException, Request
+import json
+
 @app.post("/scrape_match")
-async def get_match_details(request: MatchRequest):
+async def get_match_details(request: Request):
     try:
-        if not request.url.startswith('https://www.besoccer.com/match/'):
-            raise HTTPException(status_code=400, detail="URL debe comenzar con https://www.besoccer.com/match/")
+        # 1. Obtener el cuerpo de la solicitud
+        body = await request.json()
+        print("Cuerpo recibido:", body)  # ← Log importante
+
+        # 2. Validar que existe el campo 'url'
+        if "url" not in body:
+            raise HTTPException(status_code=422, detail="Falta el campo 'url' en el cuerpo")
         
-        result = scrape_match_details(request.url)
+        url = body["url"]
+        print("URL recibida para scraping:", url)  # ← Log importante
+
+        # 3. Validar formato de URL
+        if not isinstance(url, str):
+            raise HTTPException(status_code=400, detail="URL debe ser texto")
+            
+        if not url.startswith('https://www.besoccer.com/match/'):
+            raise HTTPException(status_code=400, detail="URL debe ser de Besoccer")
+
+        # 4. Ejecutar scraping
+        result = scrape_match_details(url)
         
         if "error" in result:
+            print("Error en scraping:", result["error"])  # ← Log importante
             raise HTTPException(status_code=400, detail=result["error"])
             
         return result
         
+    except json.JSONDecodeError:
+        print("Error: Cuerpo no es JSON válido")
+        raise HTTPException(status_code=400, detail="Cuerpo debe ser JSON")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        print("Error interno:", str(e))  # ← Log importante
+        raise HTTPException(status_code=500, detail=f"Error interno: {str(e)}")
 # Para ejecutar localmente: uvicorn main:app --reload

@@ -252,7 +252,28 @@ def get_matches():
 @app.get("/scrape_match/{match_id}")
 async def get_match_details_by_id(match_id: str):
     try:
-        url = f"https://www.besoccer.com/match/{match_id}"
+        # Verificar si el match_id ya es una URL completa
+        if match_id.startswith('https://'):
+            url = match_id
+        else:
+            url = f"https://www.besoccer.com/match/{match_id}"
+        
+        data = scrape_match_details(url)
+        
+        if "error" in data:
+            raise HTTPException(status_code=404, detail=data["error"])
+            
+        return JSONResponse(content=data)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Mantén también el endpoint POST para compatibilidad
+@app.post("/scrape_match")
+async def get_match_details(url: str = Body(..., embed=True)):
+    try:
+        if not url.startswith('https://www.besoccer.com/match/'):
+            raise HTTPException(status_code=400, detail="URL no válida")
+        
         data = scrape_match_details(url)
         
         if "error" in data:

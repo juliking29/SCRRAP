@@ -123,6 +123,13 @@ def scrape_matches():
         return {"error": f"Error al obtener la página. Código: {response.status_code}"}
 
 def scrape_match_details(match_url: str):
+    # Ensure URL has correct format
+    if not match_url.startswith('https://www.besoccer.com/match/'):
+        if match_url.isdigit():  # If it's just an ID
+            match_url = f"https://www.besoccer.com/match/{match_url}"
+        else:
+            return {"error": "Invalid match URL"}
+
     response = requests.get(match_url)
     
     if response.status_code == 200:
@@ -135,57 +142,57 @@ def scrape_match_details(match_url: str):
             "probabilities": {}
         }
         
-        # Obtener el contenedor principal del partido
+        # Get main match container
         match_div = soup.find('div', class_='info match-link')
         
         if not match_div:
-            return {"error": "No se encontró la información del partido"}
+            return {"error": "Could not find match information"}
         
-        # Información de los equipos
+        # Team information
         home_team = match_div.find('div', class_='team match-team left')
         away_team = match_div.find('div', class_='team match-team right')
         
         if home_team and away_team:
-            # Equipo local
+            # Home team
             home_name_elem = home_team.find('p', class_='name')
             if home_name_elem and home_name_elem.find('a'):
                 match_info["homeTeam"]["name"] = home_name_elem.find('a').text.strip()
             else:
-                match_info["homeTeam"]["name"] = home_name_elem.text.strip() if home_name_elem else "Equipo Local"
+                match_info["homeTeam"]["name"] = home_name_elem.text.strip() if home_name_elem else "Home Team"
                 
             match_info["homeTeam"]["logo"] = home_team.find('img')['src'] if home_team.find('img') else ""
             match_info["homeTeam"]["yellowCards"] = home_team.find('span', class_='yc').text.strip() if home_team.find('span', class_='yc') else "0"
             match_info["homeTeam"]["possession"] = home_team.find('span', class_='posesion-perc').text.strip() if home_team.find('span', class_='posesion-perc') else "0%"
             
-            # Equipo visitante
+            # Away team
             away_name_elem = away_team.find('p', class_='name')
             if away_name_elem and away_name_elem.find('a'):
                 match_info["awayTeam"]["name"] = away_name_elem.find('a').text.strip()
             else:
-                match_info["awayTeam"]["name"] = away_name_elem.text.strip() if away_name_elem else "Equipo Visitante"
+                match_info["awayTeam"]["name"] = away_name_elem.text.strip() if away_name_elem else "Away Team"
                 
             match_info["awayTeam"]["logo"] = away_team.find('img')['src'] if away_team.find('img') else ""
             match_info["awayTeam"]["yellowCards"] = away_team.find('span', class_='yc').text.strip() if away_team.find('span', class_='yc') else "0"
             match_info["awayTeam"]["possession"] = away_team.find('span', class_='posesion-perc').text.strip() if away_team.find('span', class_='posesion-perc') else "0%"
         
-        # Marcador
+        # Score
         marker = match_div.find('div', class_='marker')
         if marker:
             score_div = marker.find('div', class_='data')
             if score_div:
                 match_info["matchDetails"]["score"] = score_div.get_text(strip=True)
         
-        # Estado del partido
+        # Match status
         status_tag = match_div.find('div', class_='tag')
         if status_tag:
             match_info["matchDetails"]["status"] = status_tag.text.strip()
         
-        # Fecha y hora del partido
+        # Date and time
         date_div = match_div.find('div', class_='date header-match-date')
         if date_div:
             match_info["matchDetails"]["dateTime"] = date_div.text.strip()
         
-        # Probabilidades
+        # Probabilities
         elo_bar = soup.find('div', class_='elo-bar-content')
         if elo_bar:
             team1_label = elo_bar.find('div', class_='team1-c')
@@ -199,7 +206,7 @@ def scrape_match_details(match_url: str):
             if team2_label:
                 match_info["probabilities"]["away"] = team2_label.find('div').text.strip() if team2_label.find('div') else "0%"
             
-            # Valores numéricos
+            # Numeric values
             team1_bar = elo_bar.find('div', class_='team1-bar')
             draw_bar = elo_bar.find('div', class_='draw-bar')
             team2_bar = elo_bar.find('div', class_='team2-bar')
@@ -228,14 +235,14 @@ def scrape_match_details(match_url: str):
             else:
                 match_info["probabilities"]["awayValue"] = 33
         else:
-            # Valores por defecto si no se encuentran probabilidades
+            # Default values if probabilities not found
             match_info["probabilities"]["homeValue"] = 33
             match_info["probabilities"]["drawValue"] = 34
             match_info["probabilities"]["awayValue"] = 33
         
         return match_info
     else:
-        return {"error": f"Error al obtener la página del partido. Código: {response.status_code}"}
+        return {"error": f"Failed to fetch match page. Status code: {response.status_code}"}
 
 @app.get("/")
 def root():
@@ -252,13 +259,11 @@ def get_matches():
 @app.get("/scrape_match/{match_id}")
 async def get_match_details_by_id(match_id: str):
     try:
-        # Verificar si el match_id ya es una URL completa
-        if match_id.startswith('https://'):
-            url = match_id
-        else:
-            url = f"https://www.besoccer.com/match/{match_id}"
+        # Construir la URL completa de Besoccer con el ID
+        besoccer_url = f"https://www.besoccer.com/match/{match_id}"
         
-        data = scrape_match_details(url)
+        # Realizar el scraping en la URL de Besoccer
+        data = scrape_match_details(besoccer_url)
         
         if "error" in data:
             raise HTTPException(status_code=404, detail=data["error"])

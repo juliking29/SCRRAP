@@ -42,7 +42,7 @@ def scrape_matches():
             if not contenedor_partidos:
                 continue
 
-            partidos = contenedor_partidos.find_all('a', class_='match-link')  # Cambiado a 'a' para obtener el href
+            partidos = contenedor_partidos.find_all('a', class_='match-link')
             if not partidos:
                 continue
                 
@@ -92,7 +92,7 @@ def scrape_matches():
                 today = datetime.now().strftime('%Y-%m-%d')
                 
                 match_data = {
-                    "href": match_href,  # Añadido el href
+                    "href": match_href,
                     "homeTeam": {
                         "name": nombre_local,
                         "logo": logo_local
@@ -126,7 +126,7 @@ def scrape_match_details(match_url: str):
     # Ensure URL has correct format
     if not match_url.startswith('https://www.besoccer.com/match/'):
         if match_url.isdigit():  # If it's just an ID
-            match_url = f"https://www.besoccer.com/match/{match_url}"
+            match_url = f"https://www.besoccer.com/match/{match_id}"
         else:
             return {"error": "Invalid match URL"}
 
@@ -139,7 +139,8 @@ def scrape_match_details(match_url: str):
             "homeTeam": {},
             "awayTeam": {},
             "matchDetails": {},
-            "probabilities": {}
+            "probabilities": {},
+            "events": []
         }
         
         # Get main match container
@@ -192,53 +193,118 @@ def scrape_match_details(match_url: str):
         if date_div:
             match_info["matchDetails"]["dateTime"] = date_div.text.strip()
         
-        # Probabilities
-        elo_bar = soup.find('div', class_='elo-bar-content')
-        if elo_bar:
-            team1_label = elo_bar.find('div', class_='team1-c')
-            draw_label = elo_bar.find('div', class_='color-grey2')
-            team2_label = elo_bar.find('div', class_='team2-c')
+        # Scrape events
+        events_container = soup.find('div', id='orderEvent')
+        if events_container:
+            panels = events_container.find_all('div', class_='panel')
             
-            if team1_label:
-                match_info["probabilities"]["home"] = team1_label.find('div').text.strip() if team1_label.find('div') else "0%"
-            if draw_label:
-                match_info["probabilities"]["draw"] = draw_label.find('div').text.strip() if draw_label.find('div') else "0%"
-            if team2_label:
-                match_info["probabilities"]["away"] = team2_label.find('div').text.strip() if team2_label.find('div') else "0%"
+            for panel in panels:
+                panel_title = panel.find('h2', class_='panel-head').text.strip().lower()
+                
+                if 'goal' in panel_title:
+                    event_type = 'goal'
+                elif 'card' in panel_title:
+                    event_type = 'yellow_card'  # We'll check for red cards later
+                elif 'substitution' in panel_title:
+                    event_type = 'substitution'
+                else:
+                    event_type = 'other'
+                
+                events = panel.find_all('div', class_='table-played-match')
+                
+                for event in events:
+                    minute_div = event.find('div', class_='min')
+                    minute = minute_div.text.strip().replace("'", "") if minute_div else "0"
+                    
+                    # Determine team (left or right arrow)
+                    arrow = event.find('span', class_='arrow')
+                    team = 'home' if arrow and 'right' in arrow.get('class', []) else 'away'
+                    
+                    # Event details
+                    event_data = {
+                        "type": event_type,
+                        "minute": int(minute) if minute.isdigit() else 0,
+                        "team": team
+                    }
+                    
+                    # Handle different event types
+                    if event_type == 'goal':
+                        player_elems = event.find_all('a', class_='name')
+                        if len(player_elems) >= 1:
+                            event_data["player"] = player_elems[0].text.strip()
+                            if len(player_elems) > 1:
+                                event_data["assist"] = player_elems[1].text.strip()
+                    
+                    elif event_type in ['yellow_card', 'red_card']:
+                        player_elem = event.find('a', class_='name')
+                        if player_elem:
+                            event_data["player"] = player_elem.text.strip()
+                        
+                        # Check if it's a red card
+                        if event.find('img', src=lambda x: x and 'red' in x.lower()):
+                            event_data["type"] = 'red_card'
+                    
+                    elif event_type == 'substitution':
+                        player_elems = event.find_all('a', class_='name')
+                        if len(player_elems) >= 2:
+                            event_data["playerOut"] = player_elems[0].text.strip()
+                            event_data["playerIn"] = player_elems[1].text.strip()
+                    
+                    match_info["events"].append(event_data)
+        
+        # Scrape probabilities from analysis page
+        analysis_url = f"{match_url}/analysis"
+        analysis_response = requests.get(analysis_url)
+        
+        if analysis_response.status_code == 200:
+            analysis_soup = BeautifulSoup(analysis_response.text, 'html.parser')
+            elo_bar = analysis_soup.find('div', class_='elo-bar-content')
             
-            # Numeric values
-            team1_bar = elo_bar.find('div', class_='team1-bar')
-            draw_bar = elo_bar.find('div', class_='draw-bar')
-            team2_bar = elo_bar.find('div', class_='team2-bar')
-            
-            if team1_bar and 'style' in team1_bar.attrs:
-                try:
-                    match_info["probabilities"]["homeValue"] = float(team1_bar['style'].split(':')[1].replace('%', '').strip())
-                except:
+            if elo_bar:
+                team1_label = elo_bar.find('div', class_='team1-c')
+                draw_label = elo_bar.find('div', class_='color-grey2')
+                team2_label = elo_bar.find('div', class_='team2-c')
+                
+                if team1_label:
+                    match_info["probabilities"]["home"] = team1_label.find('div').text.strip() if team1_label.find('div') else "0%"
+                if draw_label:
+                    match_info["probabilities"]["draw"] = draw_label.find('div').text.strip() if draw_label.find('div') else "0%"
+                if team2_label:
+                    match_info["probabilities"]["away"] = team2_label.find('div').text.strip() if team2_label.find('div') else "0%"
+                
+                # Numeric values
+                team1_bar = elo_bar.find('div', class_='team1-bar')
+                draw_bar = elo_bar.find('div', class_='draw-bar')
+                team2_bar = elo_bar.find('div', class_='team2-bar')
+                
+                if team1_bar and 'style' in team1_bar.attrs:
+                    try:
+                        match_info["probabilities"]["homeValue"] = float(team1_bar['style'].split(':')[1].replace('%', '').strip())
+                    except:
+                        match_info["probabilities"]["homeValue"] = 33
+                else:
                     match_info["probabilities"]["homeValue"] = 33
-            else:
-                match_info["probabilities"]["homeValue"] = 33
-            
-            if draw_bar and 'style' in draw_bar.attrs:
-                try:
-                    match_info["probabilities"]["drawValue"] = float(draw_bar['style'].split(':')[1].replace('%', '').strip())
-                except:
+                
+                if draw_bar and 'style' in draw_bar.attrs:
+                    try:
+                        match_info["probabilities"]["drawValue"] = float(draw_bar['style'].split(':')[1].replace('%', '').strip())
+                    except:
+                        match_info["probabilities"]["drawValue"] = 34
+                else:
                     match_info["probabilities"]["drawValue"] = 34
-            else:
-                match_info["probabilities"]["drawValue"] = 34
-            
-            if team2_bar and 'style' in team2_bar.attrs:
-                try:
-                    match_info["probabilities"]["awayValue"] = float(team2_bar['style'].split(':')[1].replace('%', '').strip())
-                except:
+                
+                if team2_bar and 'style' in team2_bar.attrs:
+                    try:
+                        match_info["probabilities"]["awayValue"] = float(team2_bar['style'].split(':')[1].replace('%', '').strip())
+                    except:
+                        match_info["probabilities"]["awayValue"] = 33
+                else:
                     match_info["probabilities"]["awayValue"] = 33
             else:
+                # Default values if probabilities not found
+                match_info["probabilities"]["homeValue"] = 33
+                match_info["probabilities"]["drawValue"] = 34
                 match_info["probabilities"]["awayValue"] = 33
-        else:
-            # Default values if probabilities not found
-            match_info["probabilities"]["homeValue"] = 33
-            match_info["probabilities"]["drawValue"] = 34
-            match_info["probabilities"]["awayValue"] = 33
         
         return match_info
     else:
@@ -287,5 +353,4 @@ async def get_match_details(url: str = Body(..., embed=True)):
         return JSONResponse(content=data)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
-
 # Para ejecutar localmente: uvicorn main:app --reload
